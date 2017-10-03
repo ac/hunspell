@@ -1,8 +1,6 @@
 /* ***** BEGIN LICENSE BLOCK *****
  * Version: MPL 1.1/GPL 2.0/LGPL 2.1
  *
- * Copyright (C) 2002-2017 Németh László
- *
  * The contents of this file are subject to the Mozilla Public License Version
  * 1.1 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -13,7 +11,12 @@
  * for the specific language governing rights and limitations under the
  * License.
  *
- * Hunspell is based on MySpell which is Copyright (C) 2002 Kevin Hendricks.
+ * The Original Code is Hunspell, based on MySpell.
+ *
+ * The Initial Developers of the Original Code are
+ * Kevin Hendricks (MySpell) and Németh László (Hunspell).
+ * Portions created by the Initial Developers are Copyright (C) 2002-2005
+ * the Initial Developers. All Rights Reserved.
  *
  * Contributor(s): David Einstein, Davide Prina, Giuseppe Modugno,
  * Gianluca Turconi, Simon Brouwer, Noll János, Bíró Árpád,
@@ -76,6 +79,10 @@
 #include <string>
 #include <vector>
 
+#ifdef HUNSPELL_CHROME_CLIENT
+#include "third_party/hunspell/google/bdict_reader.h"
+#endif
+
 #define SPELL_XML "<?xml?>"
 
 #define MAXSUGGESTION 15
@@ -112,11 +119,17 @@ class LIBHUNSPELL_DLL_EXPORTED Hunspell {
    * long path names (without the long path prefix Hunspell will use fopen()
    * with system-dependent character encoding instead of _wfopen()).
    */
+#ifdef HUNSPELL_CHROME_CLIENT
+  Hunspell(const unsigned char* bdict_data, size_t bdict_length);
+#else
   Hunspell(const char* affpath, const char* dpath, const char* key = NULL);
+#endif
   ~Hunspell();
 
+#ifndef HUNSPELL_CHROME_CLIENT
   /* load extra dictionaries (only dic files) */
   int add_dic(const char* dpath, const char* key = NULL);
+#endif
 
   /* spell(word) - spellcheck word
    * output: false = bad word, true = good word

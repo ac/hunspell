@@ -1,8 +1,6 @@
 /* ***** BEGIN LICENSE BLOCK *****
  * Version: MPL 1.1/GPL 2.0/LGPL 2.1
  *
- * Copyright (C) 2002-2017 Németh László
- *
  * The contents of this file are subject to the Mozilla Public License Version
  * 1.1 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -13,7 +11,12 @@
  * for the specific language governing rights and limitations under the
  * License.
  *
- * Hunspell is based on MySpell which is Copyright (C) 2002 Kevin Hendricks.
+ * The Original Code is Hunspell, based on MySpell.
+ *
+ * The Initial Developers of the Original Code are
+ * Kevin Hendricks (MySpell) and Németh László (Hunspell).
+ * Portions created by the Initial Developers are Copyright (C) 2002-2005
+ * the Initial Developers. All Rights Reserved.
  *
  * Contributor(s): David Einstein, Davide Prina, Giuseppe Modugno,
  * Gianluca Turconi, Simon Brouwer, Noll János, Bíró Árpád,
@@ -75,6 +78,32 @@
 #include "filemgr.hxx"
 #include "csutil.hxx"
 
+#ifdef HUNSPELL_CHROME_CLIENT
+#include "third_party/hunspell/google/bdict_reader.h"
+
+FileMgr::FileMgr(hunspell::LineIterator* iterator) : iterator_(iterator) {
+}
+
+FileMgr::~FileMgr() {
+}
+
+bool FileMgr::getline(std::string& line) {
+  // Read one line from a BDICT file and return it, if we can read a line
+  // without errors.
+  bool result = iterator_->AdvanceAndCopy(line_, BUFSIZE - 1);
+  if (result)
+    line = line_;
+  return result;
+}
+
+int FileMgr::getlinenum() {
+  // This function is used only for displaying a line number that causes a
+  // parser error. For a BDICT file, providing a line number doesn't help
+  // identifying the place where causes a parser error so much since it is a
+  // binary file. So, we just return 0.
+  return 0;
+}
+#else
 int FileMgr::fail(const char* err, const char* par) {
   fprintf(stderr, err, par);
   return -1;
@@ -115,3 +144,4 @@ bool FileMgr::getline(std::string& dest) {
 int FileMgr::getlinenum() {
   return linenum;
 }
+#endif

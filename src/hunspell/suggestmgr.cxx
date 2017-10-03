@@ -1,8 +1,6 @@
 /* ***** BEGIN LICENSE BLOCK *****
  * Version: MPL 1.1/GPL 2.0/LGPL 2.1
  *
- * Copyright (C) 2002-2017 Németh László
- *
  * The contents of this file are subject to the Mozilla Public License Version
  * 1.1 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -13,7 +11,12 @@
  * for the specific language governing rights and limitations under the
  * License.
  *
- * Hunspell is based on MySpell which is Copyright (C) 2002 Kevin Hendricks.
+ * The Original Code is Hunspell, based on MySpell.
+ *
+ * The Initial Developers of the Original Code are
+ * Kevin Hendricks (MySpell) and Németh László (Hunspell).
+ * Portions created by the Initial Developers are Copyright (C) 2002-2005
+ * the Initial Developers. All Rights Reserved.
  *
  * Contributor(s): David Einstein, Davide Prina, Giuseppe Modugno,
  * Gianluca Turconi, Simon Brouwer, Noll János, Bíró Árpád,
@@ -79,7 +82,112 @@
 
 const w_char W_VLINE = {'\0', '|'};
 
+#ifdef HUNSPELL_CHROME_CLIENT
+namespace {
+// A simple class which creates temporary hentry objects which are available
+// only in a scope. To conceal memory operations from SuggestMgr functions,
+// this object automatically deletes all hentry objects created through
+// CreateScopedHashEntry() calls in its destructor. So, the following snippet
+// raises a memory error.
+//
+//   hentry* bad_copy = NULL;
+//   {
+//     ScopedHashEntryFactory factory;
+//     hentry* scoped_copy = factory.CreateScopedHashEntry(0, source);
+//     ...
+//     bad_copy = scoped_copy;
+//   }
+//   if (bad_copy->word[0])  // memory for scoped_copy has been deleted!
+//
+// As listed in the above snippet, it is simple to use this class.
+// 1. Declare an instance of this ScopedHashEntryFactory, and;
+// 2. Call its CreateHashEntry() member instead of using 'new hentry' or
+//    'operator='.
+//
+class ScopedHashEntryFactory {
+ public:
+  ScopedHashEntryFactory();
+  ~ScopedHashEntryFactory();
+
+  // Creates a temporary copy of the given hentry struct.
+  // The returned copy is available only while this object is available.
+  // NOTE: this function just calls memcpy() in creating a copy of the given
+  // hentry struct, i.e. it does NOT copy objects referred by pointers of the
+  // given hentry struct.
+  hentry* CreateScopedHashEntry(int index, const hentry* source);
+
+ private:
+  // A struct which encapsulates the new hentry struct introduced in hunspell
+  // 1.2.8. For a pointer to an hentry struct 'h', hunspell 1.2.8 stores a word
+  // (including a NUL character) into 'h->word[0]',...,'h->word[h->blen]' even
+  // though arraysize(h->word[]) is 1. Also, it changed 'astr' to a pointer so
+  // it can store affix flags into 'h->astr[0]',...,'h->astr[alen-1]'. To handle
+  // this new hentry struct, we define a struct which combines three values: an
+  // hentry struct 'hentry'; a char array 'word[kMaxWordLen]', and; an unsigned
+  // short array 'astr' so a hentry struct 'h' returned from
+  // CreateScopedHashEntry() satisfies the following equations:
+  //   hentry* h = factory.CreateScopedHashEntry(0, source);
+  //   h->word[0] == ((HashEntryItem*)h)->entry.word[0].
+  //   h->word[1] == ((HashEntryItem*)h)->word[0].
+  //   ...
+  //   h->word[h->blen] == ((HashEntryItem*)h)->word[h->blen-1].
+  //   h->astr[0] == ((HashEntryItem*)h)->astr[0].
+  //   h->astr[1] == ((HashEntryItem*)h)->astr[1].
+  //   ...
+  //   h->astr[h->alen-1] == ((HashEntryItem*)h)->astr[h->alen-1].
+  enum {
+    kMaxWordLen = 128,
+    kMaxAffixLen = 8,
+  };
+  struct HashEntryItem {
+    hentry entry;
+    char word[kMaxWordLen];
+    unsigned short astr[kMaxAffixLen];
+  };
+
+  HashEntryItem hash_items_[MAX_ROOTS];
+};
+
+ScopedHashEntryFactory::ScopedHashEntryFactory() {
+  memset(&hash_items_[0], 0, sizeof(hash_items_));
+}
+
+ScopedHashEntryFactory::~ScopedHashEntryFactory() {
+}
+
+hentry* ScopedHashEntryFactory::CreateScopedHashEntry(int index,
+                                                      const hentry* source) {
+  if (index >= MAX_ROOTS || source->blen >= kMaxWordLen)
+    return NULL;
+
+  // Retrieve a HashEntryItem struct from our spool, initialize it, and
+  // returns the address of its 'hentry' member.
+  size_t source_size = sizeof(hentry) + source->blen + 1;
+  HashEntryItem* hash_item = &hash_items_[index];
+  memcpy(&hash_item->entry, source, source_size);
+  if (source->astr) {
+    hash_item->entry.alen = source->alen;
+    if (hash_item->entry.alen > kMaxAffixLen)
+      hash_item->entry.alen = kMaxAffixLen;
+    memcpy(hash_item->astr, source->astr, hash_item->entry.alen * sizeof(hash_item->astr[0]));
+    hash_item->entry.astr = &hash_item->astr[0];
+  }
+  return &hash_item->entry;
+}
+
+}  // namespace
+#endif
+
+
+#ifdef HUNSPELL_CHROME_CLIENT
+SuggestMgr::SuggestMgr(hunspell::BDictReader* reader,
+                       const char * tryme, int maxn, 
+                       AffixMgr * aptr)
+{
+  bdict_reader = reader;
+#else
 SuggestMgr::SuggestMgr(const char* tryme, unsigned int maxn, AffixMgr* aptr) {
+#endif
   // register affix manager and check in string of chars to
   // try when building candidate suggestions
   pAMgr = aptr;
@@ -406,6 +514,21 @@ int SuggestMgr::replchars(std::vector<std::string>& wlst,
   int wl = strlen(word);
   if (wl < 2 || !pAMgr)
     return wlst.size();
+
+// TODO: wrong, 'ns' doesn't exist any more
+#ifdef HUNSPELL_CHROME_CLIENT
+  const char *pattern, *pattern2;
+  hunspell::ReplacementIterator iterator = bdict_reader->GetReplacementIterator();
+  while (iterator.GetNext(&pattern, &pattern2)) {
+    const char* r = word;
+    size_t lenr = strlen(pattern2);
+    size_t lenp = strlen(pattern);
+
+    // search every occurence of the pattern in the word
+    while ((r=strstr(r, pattern)) != NULL) {
+      candidate = word;
+      candidate.replace(r-word, lenp, pattern2);
+#else
   const std::vector<replentry>& reptable = pAMgr->get_reptable();
   for (size_t i = 0; i < reptable.size(); ++i) {
     const char* r = word;
@@ -425,6 +548,7 @@ int SuggestMgr::replchars(std::vector<std::string>& wlst,
       candidate.resize(r - word);
       candidate.append(reptable[i].outstrings[type]);
       candidate.append(r + reptable[i].pattern.size());
+#endif
       testsug(wlst, candidate, cpdsuggest, NULL, NULL);
       // check REP suggestions with space
       size_t sp = candidate.find(' ');
@@ -1044,6 +1168,9 @@ void SuggestMgr::ngsuggest(std::vector<std::string>& wlst,
 
   struct hentry* hp = NULL;
   int col = -1;
+#ifdef HUNSPELL_CHROME_CLIENT
+  ScopedHashEntryFactory hash_entry_factory;
+#endif
   phonetable* ph = (pAMgr) ? pAMgr->get_phonetable() : NULL;
   std::string target;
   std::string candidate;
@@ -1071,10 +1198,12 @@ void SuggestMgr::ngsuggest(std::vector<std::string>& wlst,
     u8_u16(w_word, word);
     u8_u16(w_target, target);
   }
-  
+
+  std::vector<w_char> w_entry;
   std::string f;
   std::vector<w_char> w_f;
-  
+  std::vector<w_char> w_target2;
+
   for (size_t i = 0; i < rHMgr.size(); ++i) {
     while (0 != (hp = rHMgr[i]->walk_hashtable(col, hp))) {
       if ((hp->astr) && (pAMgr) &&
@@ -1086,23 +1215,13 @@ void SuggestMgr::ngsuggest(std::vector<std::string>& wlst,
         continue;
 
       if (utf8) {
-        u8_u16(w_f, HENTRY_WORD(hp));
-
-        int leftcommon = leftcommonsubstring(w_word, w_f);
-        if (low) {
-          // lowering dictionary word
-          mkallsmall_utf(w_f, langnum);
-        }
-        sc = ngram(3, w_word, w_f, NGRAM_LONGER_WORSE) + leftcommon;
+        w_entry.clear();
+        u8_u16(w_entry, HENTRY_WORD(hp));
+        sc = ngram(3, w_word, w_entry, NGRAM_LONGER_WORSE + low) +
+             leftcommonsubstring(w_word, w_entry);
       } else {
-        f.assign(HENTRY_WORD(hp));
-
-        int leftcommon = leftcommonsubstring(word, f.c_str());
-        if (low) {
-          // lowering dictionary word
-          mkallsmall(f, csconv);
-        }
-        sc = ngram(3, word, f, NGRAM_LONGER_WORSE) + leftcommon;
+        sc = ngram(3, word, HENTRY_WORD(hp), NGRAM_LONGER_WORSE + low) +
+             leftcommonsubstring(word, HENTRY_WORD(hp));
       }
 
       // check special pronounciation
@@ -1111,21 +1230,13 @@ void SuggestMgr::ngsuggest(std::vector<std::string>& wlst,
           copy_field(f, HENTRY_DATA(hp), MORPH_PHON)) {
         int sc2;
         if (utf8) {
-          u8_u16(w_f, f);
-
-          int leftcommon = leftcommonsubstring(w_word, w_f);
-          if (low) {
-            // lowering dictionary word
-            mkallsmall_utf(w_f, langnum);
-          }
-          sc2 = ngram(3, w_word, w_f, NGRAM_LONGER_WORSE) + leftcommon;
+          w_f.clear();
+          u8_u16(w_f, f.c_str());
+          sc2 = ngram(3, w_word, w_f, NGRAM_LONGER_WORSE + low) +
+                leftcommonsubstring(w_word, w_f);
         } else {
-          int leftcommon = leftcommonsubstring(word, f.c_str());
-          if (low) {
-            // lowering dictionary word
-            mkallsmall(f, csconv);
-          }
-          sc2 = ngram(3, word, f, NGRAM_LONGER_WORSE) + leftcommon;
+          sc2 = ngram(3, word, f, NGRAM_LONGER_WORSE + low) +
+                leftcommonsubstring(word, f.c_str());
         }
         if (sc2 > sc)
           sc = sc2;
@@ -1134,6 +1245,7 @@ void SuggestMgr::ngsuggest(std::vector<std::string>& wlst,
       int scphon = -20000;
       if (ph && (sc > 2) && (abs(n - (int)hp->clen) <= 3)) {
         if (utf8) {
+          w_candidate.clear();
           u8_u16(w_candidate, HENTRY_WORD(hp));
           mkallcap_utf(w_candidate, langnum);
           u16_u8(candidate, w_candidate);
@@ -1141,20 +1253,25 @@ void SuggestMgr::ngsuggest(std::vector<std::string>& wlst,
           candidate = HENTRY_WORD(hp);
           mkallcap(candidate, csconv);
         }
-        f = phonet(candidate, *ph);
+        std::string target2 = phonet(candidate, *ph);
+        w_target2.clear();
         if (utf8) {
-          u8_u16(w_f, f);
-          scphon = 2 * ngram(3, w_target, w_f,
+          u8_u16(w_target2, target2.c_str());
+          scphon = 2 * ngram(3, w_target, w_target2,
                              NGRAM_LONGER_WORSE);
         } else {
-          scphon = 2 * ngram(3, target, f,
+          scphon = 2 * ngram(3, target, target2,
                              NGRAM_LONGER_WORSE);
         }
       }
 
       if (sc > scores[lp]) {
         scores[lp] = sc;
+#ifdef HUNSPELL_CHROME_CLIENT
+        roots[lp] = hash_entry_factory.CreateScopedHashEntry(lp, hp);
+#else
         roots[lp] = hp;
+#endif
         lval = sc;
         for (int j = 0; j < MAX_ROOTS; j++)
           if (scores[j] < lval) {
@@ -1188,24 +1305,12 @@ void SuggestMgr::ngsuggest(std::vector<std::string>& wlst,
         w_mw[k].l = '*';
         w_mw[k].h = 0;
       }
-
-      if (low) {
-        // lowering dictionary word
-        mkallsmall_utf(w_mw, langnum);
-      }
-
-      thresh += ngram(n, w_word, w_mw, NGRAM_ANY_MISMATCH);
+      thresh += ngram(n, w_word, w_mw, NGRAM_ANY_MISMATCH + low);
     } else {
       std::string mw = word;
       for (int k = sp; k < n; k += 4)
         mw[k] = '*';
-
-      if (low) {
-        // lowering dictionary word
-        mkallsmall(mw, csconv);
-      }
-
-      thresh += ngram(n, word, mw, NGRAM_ANY_MISMATCH);
+      thresh += ngram(n, word, mw, NGRAM_ANY_MISMATCH + low);
     }
   }
   thresh = thresh / 3;
@@ -1233,6 +1338,7 @@ void SuggestMgr::ngsuggest(std::vector<std::string>& wlst,
     return;
   }
 
+  std::vector<w_char> w_glst_word;
   for (int i = 0; i < MAX_ROOTS; i++) {
     if (roots[i]) {
       struct hentry* rp = roots[i];
@@ -1247,25 +1353,15 @@ void SuggestMgr::ngsuggest(std::vector<std::string>& wlst,
 
       for (int k = 0; k < nw; k++) {
         if (utf8) {
-          u8_u16(w_f, glst[k].word);
-
-          int leftcommon = leftcommonsubstring(w_word, w_f);
-          if (low) {
-            // lowering dictionary word
-            mkallsmall_utf(w_f, langnum);
-          }
-
-          sc = ngram(n, w_word, w_f, NGRAM_ANY_MISMATCH) + leftcommon;
+          w_glst_word.clear();
+          u8_u16(w_glst_word, glst[k].word);
+          sc = ngram(n, w_word, w_glst_word,
+                     NGRAM_ANY_MISMATCH + low) +
+               leftcommonsubstring(w_word, w_glst_word);
         } else {
-          f = glst[k].word;
-
-          int leftcommon = leftcommonsubstring(word, f.c_str());
-          if (low) {
-            // lowering dictionary word
-            mkallsmall(f, csconv);
-          }
-
-          sc = ngram(n, word, f, NGRAM_ANY_MISMATCH) + leftcommon;
+          sc = ngram(n, word, glst[k].word,
+                     NGRAM_ANY_MISMATCH + low) +
+               leftcommonsubstring(word, glst[k].word);
         }
 
         if (sc > thresh) {
@@ -1327,6 +1423,7 @@ void SuggestMgr::ngsuggest(std::vector<std::string>& wlst,
       std::string gl;
       int len;
       if (utf8) {
+        w_gl.clear();
         len = u8_u16(w_gl, guess[i]);
         mkallsmall_utf(w_gl, langnum);
         u16_u8(gl, w_gl);
@@ -1346,39 +1443,22 @@ void SuggestMgr::ngsuggest(std::vector<std::string>& wlst,
       }
       // using 2-gram instead of 3, and other weightening
 
+      w_gl.clear();
       if (utf8) {
         u8_u16(w_gl, gl);
-        //w_gl is lowercase already at this point
-        re = ngram(2, w_word, w_gl, NGRAM_ANY_MISMATCH + NGRAM_WEIGHTED);
-        if (low) {
-          w_f = w_word;
-          // lowering dictionary word
-          mkallsmall_utf(w_f, langnum);
-          re += ngram(2, w_gl, w_f, NGRAM_ANY_MISMATCH + NGRAM_WEIGHTED);
-        } else {
-          re += ngram(2, w_gl, w_word, NGRAM_ANY_MISMATCH + NGRAM_WEIGHTED);
-        }
+        re = ngram(2, w_word, w_gl, NGRAM_ANY_MISMATCH + low + NGRAM_WEIGHTED) +
+             ngram(2, w_gl, w_word, NGRAM_ANY_MISMATCH + low + NGRAM_WEIGHTED);
       } else {
-        //gl is lowercase already at this point
-        re = ngram(2, word, gl, NGRAM_ANY_MISMATCH + NGRAM_WEIGHTED);
-        if (low) {
-          f = word;
-          // lowering dictionary word
-          mkallsmall(f, csconv);
-          re += ngram(2, gl, f, NGRAM_ANY_MISMATCH + NGRAM_WEIGHTED);
-        } else {
-          re += ngram(2, gl, word, NGRAM_ANY_MISMATCH + NGRAM_WEIGHTED);
-        }
+        re = ngram(2, word, gl, NGRAM_ANY_MISMATCH + low + NGRAM_WEIGHTED) +
+             ngram(2, gl, word, NGRAM_ANY_MISMATCH + low + NGRAM_WEIGHTED);
       }
 
       int ngram_score, leftcommon_score;
       if (utf8) {
-        //w_gl is lowercase already at this point
-        ngram_score = ngram(4, w_word, w_gl, NGRAM_ANY_MISMATCH);
+        ngram_score = ngram(4, w_word, w_gl, NGRAM_ANY_MISMATCH + low);
         leftcommon_score = leftcommonsubstring(w_word, w_gl);
       } else {
-        //gl is lowercase already at this point
-        ngram_score = ngram(4, word, gl, NGRAM_ANY_MISMATCH);
+        ngram_score = ngram(4, word, gl, NGRAM_ANY_MISMATCH + low);
         leftcommon_score = leftcommonsubstring(word, gl.c_str());
       }
       gscore[i] =
@@ -1411,6 +1491,7 @@ void SuggestMgr::ngsuggest(std::vector<std::string>& wlst,
         // lowering rootphon[i]
         std::string gl;
         int len;
+        w_gl.clear();
         if (utf8) {
           len = u8_u16(w_gl, rootsphon[i]);
           mkallsmall_utf(w_gl, langnum);
@@ -1722,10 +1803,11 @@ std::string SuggestMgr::suggest_hentry_gen(hentry* rv, const char* pattern) {
   if (HENTRY_DATA(rv))
     p = (char*)strstr(HENTRY_DATA2(rv), MORPH_ALLOMORPH);
   while (p) {
+    struct hentry* rv2 = NULL;
     p += MORPH_TAG_LEN;
     int plen = fieldlen(p);
     std::string allomorph(p, plen);
-    struct hentry* rv2 = pAMgr->lookup(allomorph.c_str());
+    rv2 = pAMgr->lookup(allomorph.c_str());
     while (rv2) {
       //            if (HENTRY_DATA(rv2) && get_sfxcount(HENTRY_DATA(rv2)) <=
       //            sfxcount) {
@@ -1849,6 +1931,14 @@ int SuggestMgr::ngram(int n,
   l2 = su2.size();
   if (l2 == 0)
     return 0;
+  // lowering dictionary word
+  const std::vector<w_char>* p_su2 = &su2;
+  std::vector<w_char> su2_copy;
+  if (opt & NGRAM_LOWERING) {
+    su2_copy = su2;
+    mkallsmall_utf(su2_copy, langnum);
+    p_su2 = &su2_copy;
+  }
   for (int j = 1; j <= n; j++) {
     ns = 0;
     for (int i = 0; i <= (l1 - j); i++) {
@@ -1856,7 +1946,7 @@ int SuggestMgr::ngram(int n,
       for (int l = 0; l <= (l2 - j); l++) {
         for (k = 0; k < j; k++) {
           const w_char& c1 = su1[i + k];
-          const w_char& c2 = su2[l + k];
+          const w_char& c2 = (*p_su2)[l + k];
           if ((c1.l != c2.l) || (c1.h != c2.h))
             break;
         }
@@ -1901,11 +1991,14 @@ int SuggestMgr::ngram(int n,
   if (l2 == 0)
     return 0;
   l1 = s1.size();
+  std::string t(s2);
+  if (opt & NGRAM_LOWERING)
+    mkallsmall(t, csconv);
   for (int j = 1; j <= n; j++) {
     ns = 0;
     for (int i = 0; i <= (l1 - j); i++) {
-      //s2 is haystack, s1[i..i+j) is needle
-      if (s2.find(s1.c_str()+i, 0, j) != std::string::npos) {
+      //t is haystack, s1[i..i+j) is needle
+      if (t.find(s1.c_str()+i, 0, j) != std::string::npos) {
         ns++;
       } else if (opt & NGRAM_WEIGHTED) {
         ns--;
@@ -2093,8 +2186,8 @@ void SuggestMgr::lcs(const char* s,
     m = strlen(s);
     n = strlen(s2);
   }
-  c = (char*)malloc((m + 1) * (n + 1));
-  b = (char*)malloc((m + 1) * (n + 1));
+  c = (char *) calloc(m + 1, n + 1);
+  b = (char *) calloc(m + 1, n + 1);
   if (!c || !b) {
     if (c)
       free(c);
@@ -2103,10 +2196,6 @@ void SuggestMgr::lcs(const char* s,
     *result = NULL;
     return;
   }
-  for (i = 1; i <= m; i++)
-    c[i * (n + 1)] = 0;
-  for (j = 0; j <= n; j++)
-    c[j] = 0;
   for (i = 1; i <= m; i++) {
     for (j = 1; j <= n; j++) {
       if (((utf8) && (su[i - 1] == su2[j - 1])) ||

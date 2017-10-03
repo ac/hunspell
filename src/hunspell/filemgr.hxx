@@ -1,8 +1,6 @@
 /* ***** BEGIN LICENSE BLOCK *****
  * Version: MPL 1.1/GPL 2.0/LGPL 2.1
  *
- * Copyright (C) 2002-2017 Németh László
- *
  * The contents of this file are subject to the Mozilla Public License Version
  * 1.1 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -13,7 +11,12 @@
  * for the specific language governing rights and limitations under the
  * License.
  *
- * Hunspell is based on MySpell which is Copyright (C) 2002 Kevin Hendricks.
+ * The Original Code is Hunspell, based on MySpell.
+ *
+ * The Initial Developers of the Original Code are
+ * Kevin Hendricks (MySpell) and Németh László (Hunspell).
+ * Portions created by the Initial Developers are Copyright (C) 2002-2005
+ * the Initial Developers. All Rights Reserved.
  *
  * Contributor(s): David Einstein, Davide Prina, Giuseppe Modugno,
  * Gianluca Turconi, Simon Brouwer, Noll János, Bíró Árpád,
@@ -77,6 +80,30 @@
 #include <string>
 #include <fstream>
 
+#ifdef HUNSPELL_CHROME_CLIENT
+namespace hunspell {
+class LineIterator;
+}  // namespace hunspell
+
+// A class which encapsulates operations of reading a BDICT file.
+// Chrome uses a BDICT file to compress hunspell dictionaries. A BDICT file is
+// a binary file converted from a DIC file and an AFF file. (See
+// "bdict_reader.h" for its format.)
+// This class encapsulates the operations of reading a BDICT file and emulates
+// the original FileMgr operations for AffixMgr so that it can read a BDICT
+// file without so many changes.
+class FileMgr {
+ public:
+  FileMgr(hunspell::LineIterator* iterator);
+  ~FileMgr();
+  bool getline(std::string& line);
+  int getlinenum();
+
+ protected:
+  hunspell::LineIterator* iterator_;
+  char line_[BUFSIZE + 50]; // input buffer
+};
+#else
 class FileMgr {
  private:
   FileMgr(const FileMgr&);
@@ -95,4 +122,5 @@ class FileMgr {
   bool getline(std::string&);
   int getlinenum();
 };
+#endif
 #endif

@@ -1,8 +1,6 @@
 /* ***** BEGIN LICENSE BLOCK *****
  * Version: MPL 1.1/GPL 2.0/LGPL 2.1
  *
- * Copyright (C) 2002-2017 Németh László
- *
  * The contents of this file are subject to the Mozilla Public License Version
  * 1.1 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -13,7 +11,12 @@
  * for the specific language governing rights and limitations under the
  * License.
  *
- * Hunspell is based on MySpell which is Copyright (C) 2002 Kevin Hendricks.
+ * The Original Code is Hunspell, based on MySpell.
+ *
+ * The Initial Developers of the Original Code are
+ * Kevin Hendricks (MySpell) and Németh László (Hunspell).
+ * Portions created by the Initial Developers are Copyright (C) 2002-2005
+ * the Initial Developers. All Rights Reserved.
  *
  * Contributor(s): David Einstein, Davide Prina, Giuseppe Modugno,
  * Gianluca Turconi, Simon Brouwer, Noll János, Bíró Árpád,
@@ -84,11 +87,19 @@
 
 #include "csutil.hxx"
 
+#ifdef HUNSPELL_CHROME_CLIENT
+AffixMgr::AffixMgr(hunspell::BDictReader* reader,
+                   const std::vector<HashMgr*>& ptr)
+  : alldic(ptr)
+  , pHMgr(ptr[0]) {
+  bdict_reader = reader;
+#else
 AffixMgr::AffixMgr(const char* affpath,
                    const std::vector<HashMgr*>& ptr,
                    const char* key)
   : alldic(ptr)
   , pHMgr(ptr[0]) {
+#endif
 
   // register hash manager and load affix data from aff file
   csconv = NULL;
@@ -163,9 +174,17 @@ AffixMgr::AffixMgr(const char* affpath,
     sFlag[i] = NULL;
   }
 
+#ifdef HUNSPELL_CHROME_CLIENT
+  // Define dummy parameters for parse_file() to avoid changing the parameters
+  // of parse_file(). This may make it easier to merge the changes of the
+  // original hunspell.
+  const char* affpath = NULL;
+  const char* key = NULL;
+#else
   for (int j = 0; j < CONTSIZE; j++) {
     contclasses[j] = 0;
   }
+#endif
 
   if (parse_file(affpath, key)) {
     HUNSPELL_WARNING(stderr, "Failure loading aff file %s\n", affpath);
@@ -243,7 +262,44 @@ void AffixMgr::finishFileMgr(FileMgr* afflst) {
 
 // read in aff file and build up prefix and suffix entry objects
 int AffixMgr::parse_file(const char* affpath, const char* key) {
+  std::string line;
+#ifdef HUNSPELL_CHROME_CLIENT
+  // open the affix file
+  // We're always UTF-8
+  utf8 = 1;
 
+  // A BDICT file stores PFX and SFX lines in a special section and it provides
+  // a special line iterator for reading PFX and SFX lines.
+  // We create a FileMgr object from this iterator and parse PFX and SFX lines
+  // before parsing other lines.
+  hunspell::LineIterator affix_iterator = bdict_reader->GetAffixLineIterator();
+  FileMgr* iterator = new FileMgr(&affix_iterator);
+  if (!iterator) {
+    HUNSPELL_WARNING(stderr,
+        "error: could not create a FileMgr from an affix line iterator.\n");
+    return 1;
+  }
+
+  while (iterator->getline(line)) {
+    char ft = ' ';
+    if (line.compare(0, 3, "PFX") == 0) ft = complexprefixes ? 'S' : 'P';
+    if (line.compare(0, 3, "SFX") == 0) ft = complexprefixes ? 'P' : 'S';
+    if (ft != ' ')
+      parse_affix(line, ft, iterator, NULL);
+  }
+  delete iterator;
+
+  // Create a FileMgr object for reading lines except PFX and SFX lines.
+  // We don't need to change the loop below since our FileMgr emulates the
+  // original one.
+  hunspell::LineIterator other_iterator = bdict_reader->GetOtherLineIterator();
+  FileMgr * afflst = new FileMgr(&other_iterator);
+  if (!afflst) {
+    HUNSPELL_WARNING(stderr,
+        "error: could not create a FileMgr from an other line iterator.\n");
+    return 1;
+  }
+#else
   // checking flag duplication
   char dupflags[CONTSIZE];
   char dupflags_ini = 1;
@@ -258,16 +314,17 @@ int AffixMgr::parse_file(const char* affpath, const char* key) {
         stderr, "error: could not open affix description file %s\n", affpath);
     return 1;
   }
+#endif
 
   // step one is to parse the affix file building up the internal
   // affix data structures
 
   // read in each line ignoring any that do not
   // start with a known line type indicator
-  std::string line;
   while (afflst->getline(line)) {
     mychomp(line);
 
+#ifndef HUNSPELL_CHROME_CLIENT
     /* remove byte order mark */
     if (firstline) {
       firstline = 0;
@@ -277,6 +334,7 @@ int AffixMgr::parse_file(const char* affpath, const char* key) {
         line.erase(0, 3);
       }
     }
+#endif
 
     /* parse in the keyboard string */
     if (line.compare(0, 3, "KEY", 3) == 0) {
@@ -529,6 +587,7 @@ int AffixMgr::parse_file(const char* affpath, const char* key) {
       }
     }
 
+#ifndef HUNSPELL_CHROME_CLIENT
     /* parse in the typical fault correcting table */
     if (line.compare(0, 3, "REP", 3) == 0) {
       if (!parse_reptable(line, afflst)) {
@@ -536,6 +595,7 @@ int AffixMgr::parse_file(const char* affpath, const char* key) {
         return 1;
       }
     }
+#endif
 
     /* parse in the input conversion table */
     if (line.compare(0, 5, "ICONV", 5) == 0) {
@@ -685,6 +745,7 @@ int AffixMgr::parse_file(const char* affpath, const char* key) {
       checksharps = 1;
     }
 
+#ifndef HUNSPELL_CHROME_CLIENT
     /* parse this affix: P - prefix, S - suffix */
     // affix type
     char ft = ' ';
@@ -702,6 +763,7 @@ int AffixMgr::parse_file(const char* affpath, const char* key) {
         return 1;
       }
     }
+#endif
   }
 
   finishFileMgr(afflst);
@@ -1278,6 +1340,24 @@ std::string AffixMgr::prefix_check_twosfx_morph(const char* word,
 // Is word a non compound with a REP substitution (see checkcompoundrep)?
 int AffixMgr::cpdrep_check(const char* word, int wl) {
 
+#ifdef HUNSPELL_CHROME_CLIENT
+  const char *pattern, *pattern2;
+  hunspell::ReplacementIterator iterator = bdict_reader->GetReplacementIterator();
+  while (iterator.GetNext(&pattern, &pattern2)) {
+    const char* r = word;
+    const size_t lenr = strlen(pattern2);
+    const size_t lenp = strlen(pattern);
+
+    // search every occurence of the pattern in the word
+    while ((r=strstr(r, pattern)) != NULL) {
+      std::string candidate(word);
+      candidate.replace(r-word, lenp, pattern2);
+      if (candidate_check(candidate.c_str(), candidate.size())) return 1;
+      r++; // search for the next letter
+    }
+  }
+
+#else
   if ((wl < 2) || reptable.empty())
     return 0;
 
@@ -1287,8 +1367,8 @@ int AffixMgr::cpdrep_check(const char* word, int wl) {
     // search every occurence of the pattern in the word
     while ((r = strstr(r, reptable[i].pattern.c_str())) != NULL) {
       std::string candidate(word);
-      size_t type = r == word && langnum != LANG_hu ? 1 : 0;
-      if (r - word + reptable[i].pattern.size() == lenp && langnum != LANG_hu)
+      size_t type = r == word ? 1 : 0;
+      if (r - word + reptable[i].pattern.size() == lenp)
         type += 2;
       candidate.replace(r - word, lenp, reptable[i].outstrings[type]);
       if (candidate_check(candidate.c_str(), candidate.size()))
@@ -1296,6 +1376,7 @@ int AffixMgr::cpdrep_check(const char* word, int wl) {
       ++r;  // search for the next letter
     }
   }
+#endif
 
   return 0;
 }
@@ -1491,8 +1572,9 @@ int AffixMgr::defcpd_check(hentry*** words,
 }
 
 inline int AffixMgr::candidate_check(const char* word, int len) {
+  struct hentry* rv = NULL;
 
-  struct hentry* rv = lookup(word);
+  rv = lookup(word);
   if (rv)
     return 1;
 
@@ -1813,7 +1895,7 @@ struct hentry* AffixMgr::compound_check(const std::string& word,
           // LANG_hu section: spec. Hungarian rule
           if (langnum == LANG_hu) {
             // calculate syllable number of the word
-            numsyllable += get_syllable(st.substr(0, i));
+            numsyllable += get_syllable(st.substr(i));
             // + 1 word, if syllable number of the prefix > 1 (hungarian
             // convention)
             if (pfx && (get_syllable(pfx->getKey()) > 1))
@@ -1898,7 +1980,7 @@ struct hentry* AffixMgr::compound_check(const std::string& word,
                  (compoundend && TESTAFF(rv->astr, compoundend, rv->alen))) &&
                 (((cpdwordmax == -1) || (wordnum + 1 < cpdwordmax)) ||
                  ((cpdmaxsyllable != 0) &&
-                  (numsyllable + get_syllable(std::string(HENTRY_WORD(rv), rv->blen)) <=
+                  (numsyllable + get_syllable(std::string(HENTRY_WORD(rv), rv->clen)) <=
                    cpdmaxsyllable))) &&
                 (
                     // test CHECKCOMPOUNDPATTERN
@@ -2379,7 +2461,7 @@ int AffixMgr::compound_check_morph(const char* word,
         // LANG_hu section: spec. Hungarian rule
         if (langnum == LANG_hu) {
           // calculate syllable number of the word
-          numsyllable += get_syllable(st.substr(0, i));
+          numsyllable += get_syllable(st.substr(i));
 
           // + 1 word, if syllable number of the prefix > 1 (hungarian
           // convention)
@@ -3041,9 +3123,10 @@ struct hentry* AffixMgr::affix_check(const char* word,
                                      int len,
                                      const FLAG needflag,
                                      char in_compound) {
+  struct hentry* rv = NULL;
 
   // check all prefixes (also crossed with suffixes if allowed)
-  struct hentry* rv = prefix_check(word, len, in_compound, needflag);
+  rv = prefix_check(word, len, in_compound, needflag);
   if (rv)
     return rv;
 
@@ -3287,7 +3370,7 @@ int AffixMgr::expand_rootword(struct guessword* wlst,
     wlst[nh].word = mystrdup(ts);
     if (!wlst[nh].word)
       return 0;
-    wlst[nh].allow = false;
+    wlst[nh].allow = (1 == 0);
     wlst[nh].orig = NULL;
     nh++;
     // add special phonetic version
@@ -3295,7 +3378,7 @@ int AffixMgr::expand_rootword(struct guessword* wlst,
       wlst[nh].word = mystrdup(phon);
       if (!wlst[nh].word)
         return nh - 1;
-      wlst[nh].allow = false;
+      wlst[nh].allow = (1 == 0);
       wlst[nh].orig = mystrdup(ts);
       if (!wlst[nh].orig)
         return nh - 1;
@@ -3336,7 +3419,7 @@ int AffixMgr::expand_rootword(struct guessword* wlst,
               wlst[nh].word = mystrdup(prefix.c_str());
               if (!wlst[nh].word)
                 return nh - 1;
-              wlst[nh].allow = false;
+              wlst[nh].allow = (1 == 0);
               wlst[nh].orig = mystrdup(newword.c_str());
               if (!wlst[nh].orig)
                 return nh - 1;
@@ -4484,6 +4567,7 @@ bool AffixMgr::parse_affix(const std::string& line,
       case 1: {
         np++;
         aflag = pHMgr->decode_flag(std::string(start_piece, iter).c_str());
+#ifndef HUNSPELL_CHROME_CLIENT // We don't check for duplicates.
         if (((at == 'S') && (dupflags[aflag] & dupSFX)) ||
             ((at == 'P') && (dupflags[aflag] & dupPFX))) {
           HUNSPELL_WARNING(
@@ -4492,6 +4576,7 @@ bool AffixMgr::parse_affix(const std::string& line,
               af->getlinenum());
         }
         dupflags[aflag] += (char)((at == 'S') ? dupSFX : dupPFX);
+#endif
         break;
       }
       // piece 3 - is cross product indicator

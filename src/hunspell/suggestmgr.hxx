@@ -1,8 +1,6 @@
 /* ***** BEGIN LICENSE BLOCK *****
  * Version: MPL 1.1/GPL 2.0/LGPL 2.1
  *
- * Copyright (C) 2002-2017 Németh László
- *
  * The contents of this file are subject to the Mozilla Public License Version
  * 1.1 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -13,7 +11,12 @@
  * for the specific language governing rights and limitations under the
  * License.
  *
- * Hunspell is based on MySpell which is Copyright (C) 2002 Kevin Hendricks.
+ * The Original Code is Hunspell, based on MySpell.
+ *
+ * The Initial Developers of the Original Code are
+ * Kevin Hendricks (MySpell) and Németh László (Hunspell).
+ * Portions created by the Initial Developers are Copyright (C) 2002-2005
+ * the Initial Developers. All Rights Reserved.
  *
  * Contributor(s): David Einstein, Davide Prina, Giuseppe Modugno,
  * Gianluca Turconi, Simon Brouwer, Noll János, Bíró Árpád,
@@ -121,7 +124,11 @@ class SuggestMgr {
   int complexprefixes;
 
  public:
+#ifdef HUNSPELL_CHROME_CLIENT
+  SuggestMgr(hunspell::BDictReader* reader, const char * tryme, int maxn, AffixMgr *aptr);
+#else
   SuggestMgr(const char* tryme, unsigned int maxn, AffixMgr* aptr);
+#endif
   ~SuggestMgr();
 
   void suggest(std::vector<std::string>& slst, const char* word, int* onlycmpdsug);
@@ -131,6 +138,10 @@ class SuggestMgr {
   std::string suggest_gen(const std::vector<std::string>& pl, const std::string& pattern);
 
  private:
+#ifdef HUNSPELL_CHROME_CLIENT
+   // Not owned by us, owned by the Hunspell object.
+   hunspell::BDictReader* bdict_reader;
+#endif
   void testsug(std::vector<std::string>& wlst,
                const std::string& candidate,
                int cpdsuggest,

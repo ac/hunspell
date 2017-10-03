@@ -1,8 +1,6 @@
 /* ***** BEGIN LICENSE BLOCK *****
  * Version: MPL 1.1/GPL 2.0/LGPL 2.1
  *
- * Copyright (C) 2002-2017 Németh László
- *
  * The contents of this file are subject to the Mozilla Public License Version
  * 1.1 (the "License"); you may not use this file except in compliance with
  * the License. You may obtain a copy of the License at
@@ -13,7 +11,12 @@
  * for the specific language governing rights and limitations under the
  * License.
  *
- * Hunspell is based on MySpell which is Copyright (C) 2002 Kevin Hendricks.
+ * The Original Code is Hunspell, based on MySpell.
+ *
+ * The Initial Developers of the Original Code are
+ * Kevin Hendricks (MySpell) and Németh László (Hunspell).
+ * Portions created by the Initial Developers are Copyright (C) 2002-2005
+ * the Initial Developers. All Rights Reserved.
  *
  * Contributor(s): David Einstein, Davide Prina, Giuseppe Modugno,
  * Gianluca Turconi, Simon Brouwer, Noll János, Bíró Árpád,
@@ -88,6 +91,40 @@
 
 class PfxEntry;
 class SfxEntry;
+
+#ifdef HUNSPELL_CHROME_CLIENT
+
+#include <vector>
+
+// This class provides an implementation of the contclasses array in AffixMgr
+// that is normally a large static array. We should almost never need more than
+// 256 elements, so this class only allocates that much to start off with. If
+// elements higher than that are actually used, we'll automatically expand.
+class ContClasses {
+ public:
+  ContClasses() {
+    // Pre-allocate a buffer so that typically, we'll never have to resize.
+    EnsureSizeIs(256);
+  }
+
+  char& operator[](size_t index) {
+    EnsureSizeIs(index + 1);
+    return data[index];
+  }
+
+  void EnsureSizeIs(size_t new_size) {
+    if (data.size() >= new_size)
+      return;  // Nothing to do.
+
+    size_t old_size = data.size();
+    data.resize(new_size);
+    memset(&data[old_size], 0, new_size - old_size);
+  }
+
+  std::vector<char> data;
+};
+
+#endif  // HUNSPELL_CHROME_CLIENT
 
 class AffixMgr {
   PfxEntry* pStart[SETSIZE];
@@ -172,11 +209,19 @@ class AffixMgr {
   int fullstrip;
 
   int havecontclass;           // boolean variable
+#ifdef HUNSPELL_CHROME_CLIENT
+  ContClasses         contclasses;
+#else
   char contclasses[CONTSIZE];  // flags of possible continuing classes (twofold
                                // affix)
+#endif
 
  public:
+#ifdef HUNSPELL_CHROME_CLIENT
+  AffixMgr(hunspell::BDictReader* reader, const std::vector<HashMgr*>& ptr);
+#else
   AffixMgr(const char* affpath, const std::vector<HashMgr*>& ptr, const char* key = NULL);
+#endif
   ~AffixMgr();
   struct hentry* affix_check(const char* word,
                              int len,
@@ -334,6 +379,10 @@ class AffixMgr {
   int get_fullstrip() const;
 
  private:
+#ifdef HUNSPELL_CHROME_CLIENT
+  // Not owned by us, owned by the Hunspell object.
+  hunspell::BDictReader* bdict_reader;
+#endif
   int parse_file(const char* affpath, const char* key);
   bool parse_flag(const std::string& line, unsigned short* out, FileMgr* af);
   bool parse_num(const std::string& line, int* out, FileMgr* af);
