@@ -271,27 +271,27 @@ auto print_version() -> void
  *
  * \param f a finder for search paths and located dictionary.
  */
-auto list_dictionaries(Finder& f) -> void
+auto list_dictionaries(Finder& f, ostream& o = cout) -> void
 {
 	if (f.get_all_paths().empty()) {
-		cout << "No search paths available" << endl;
+		o << "No search paths available" << endl;
 	}
 	else {
-		cout << "Search paths:" << endl;
+		o << "Search paths:" << endl;
 		for (auto& p : f.get_all_paths()) {
-			cout << p << endl;
+			o << p << endl;
 		}
 	}
 
 	// Even if no search paths are available, still report on available
 	// dictionaries.
 	if (f.get_all_dictionaries().empty()) {
-		cout << "No dictionaries available" << endl;
+		o << "No dictionaries available" << endl;
 	}
 	else {
-		cout << "Available dictionaries:" << endl;
+		o << "Available dictionaries:" << endl;
 		for (auto& d : f.get_all_dictionaries()) {
-			cout << d.first << '\t' << d.second << endl;
+			o << d.first << '\t' << d.second << endl;
 		}
 	}
 }
@@ -408,14 +408,18 @@ auto correct_line_loop(istream& in, ostream& out, Dictionary& dic)
  */
 auto handle_mode(Args_t& args) -> int
 {
+	cerr << "handle_mode() entered" << endl;
 	switch (args.mode) {
 	case ERROR_MODE:
+		cerr << "ERROR_MODE" << endl;
 		return 1;
 	case HELP_MODE:
 		print_help();
+		cerr << "HELP_MODE" << endl;
 		return 0;
 	case VERSION_MODE:
 		print_version();
+		cerr << "VERSION_MODE" << endl;
 		return 0;
 	default:
 		break;
@@ -428,10 +432,10 @@ auto handle_mode(Args_t& args) -> int
 	f.add_apacheopenoffice_paths();
 	f.search_dictionaries();
 
-	if (args.mode == LIST_DICTIONARIES_MODE) {
-		list_dictionaries(f);
-		return 0;
-	}
+	//if (args.mode == LIST_DICTIONARIES_MODE) {
+		list_dictionaries(f, clog);
+	//	return 0;
+	//}
 
 	auto filename = f.get_dictionary(args.dictionary);
 	if (filename.empty()) {

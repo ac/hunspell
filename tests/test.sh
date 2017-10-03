@@ -20,7 +20,7 @@
 # Hunspell v1 is Copyright (C) 2002-2017 Németh László
 # MySpell is Copyright (C) 2002 Kevin Hendricks.
 
-# set -x # uncomment for debugging
+set -x # uncomment for debugging
 set -o pipefail
 
 export LC_ALL="C"
