@@ -70,7 +70,7 @@ fi
 
 CR=$(printf "\r")
 
-in_dict="$NAME"
+in_dict="./$NAME"
 if [[ ! -f "$in_dict.dic" ]]; then
 	echo "Dictionary $in_dict.dic does not exists"
 	exit 3
