@@ -243,3 +243,10 @@ http://hunspell.github.io/ .
 
 László Németh, nemeth at numbertext org
 
+## Chromium binary dictionaries
+```
+size_t len = 0;
+const unsigned char * filec = file_content("<CSIDL_LOCAL_APPDATA>...\User Data\Dictionaries\ru-RU-3-0.bdic", &len);
+Hunspell* pMS = new Hunspell(filec, len);
+```
+
