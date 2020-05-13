@@ -1,0 +1,66 @@
+diff --git a/ports/hunspell/CMakeLists.txt b/ports/hunspell/CMakeLists.txt
+index 810c894f7..cbb482e8e 100644
+--- a/ports/hunspell/CMakeLists.txt
++++ b/ports/hunspell/CMakeLists.txt
+@@ -11,7 +11,7 @@ option(ENABLE_NLS "Define if translation of program messages to the user's nativ
+ option(HUNSPELL_WARNING_ON "Define if you need warning messages" OFF)
+ 
+ if(NOT BUILD_SHARED_LIBS)
+-    add_definitions(-DHUNSPELL_STATIC)
++    add_definitions(-DHUNSPELL_STATIC -DHUNSPELL_CHROME_CLIENT)
+ endif()
+ 
+ if(MSVC)
+@@ -20,6 +20,9 @@ endif()
+ 
+ include_directories("src/hunspell")
+ include_directories("src/parsers")
++include_directories("S:/VS_Projects/CEF-bx-4044/chromium/src")
++include_directories("S:/VS_Projects/CEF-bx-4044/chromium/src/third_party/boringssl/src/include")
++include_directories("C:/VS_Projects/third_party")
+ 
+ #libhunspell
+ set(LIBHUNSPELL_SRCS
+@@ -46,6 +49,13 @@ set(LIBHUNSPELL_SRCS
+     src/hunspell/filemgr.hxx
+     src/hunspell/hunzip.hxx
+     src/hunspell/replist.hxx
++
++    google/bdict.cc
++    google/bdict.h
++    google/bdict_reader.cc
++    google/bdict_reader.h
++    google/bdict_writer.cc
++    google/bdict_writer.h
+ )
+ 
+ set(LIBHUNSPELL_HDRS
+@@ -118,7 +128,8 @@ if(NOT CMAKE_SYSTEM_NAME STREQUAL "WindowsStore" AND CMAKE_BUILD_TYPE STREQUAL "
+     check_include_file("locale.h" HAVE_LOCALE_H)
+     check_include_file("ncursesw/curses.h" HAVE_NCURSESW_H)
+     check_include_file("unistd.h" HAVE_UNISTD_H)
+-    configure_file("config.h.in" "config.h")
++    check_include_file("config.h" HAVE_CONFIG_H)
++#    configure_file("config.h.in" "config.h")
+ 
+     add_executable(hunspell "src/tools/hunspell.cxx" $<TARGET_OBJECTS:libparsers>)
+     target_include_directories(hunspell PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
+diff --git a/ports/hunspell/portfile.cmake b/ports/hunspell/portfile.cmake
+index a1acdfb97..3f1e0ce56 100644
+--- a/ports/hunspell/portfile.cmake
++++ b/ports/hunspell/portfile.cmake
+@@ -1,8 +1,11 @@
+ vcpkg_from_github(
+     OUT_SOURCE_PATH SOURCE_PATH
+-    REPO hunspell/hunspell
+-    REF v1.7.0
+-    SHA512 8149b2e8b703a0610c9ca5160c2dfad3cf3b85b16b3f0f5cfcb7ebb802473b2d499e8e2d0a637a97a37a24d62424e82d3880809210d3f043fa17a4970d47c903
++#    REPO hunspell/hunspell
++    REPO ac/hunspell_chrome
++#    REF v1.7.0
++    REF master
++#    SHA512 8149b2e8b703a0610c9ca5160c2dfad3cf3b85b16b3f0f5cfcb7ebb802473b2d499e8e2d0a637a97a37a24d62424e82d3880809210d3f043fa17a4970d47c903
++    SHA512 f6e7e94c0590791a4e8321445d43f74af99760ee5cac44969da257e4dde858ed7024fe4f59a841759c91c9dc6e329aa4cace20982391ed5f7d51517a4d1337f1
+     HEAD_REF master
+     PATCHES 0001_fix_unistd.patch
+ )
